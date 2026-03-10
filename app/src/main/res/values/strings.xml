@@ -1,0 +1,71 @@
+<resources>
+    <string name="app_name">HanziLens</string>
+    <string name="app_logo_hanzi">汉字镜</string>
+
+    <!-- Navigation / drawer -->
+    <string name="nav_camera">Camera</string>
+    <string name="nav_settings">Settings</string>
+    <string name="nav_about">About &amp; Licenses</string>
+    <string name="nav_about_subtitle">Libraries, credits, version info</string>
+
+    <!-- Content descriptions -->
+    <string name="cd_menu">Open navigation menu</string>
+    <string name="cd_camera_settings">Camera Settings</string>
+    <string name="cd_back">Back</string>
+    <string name="cd_copy_all">Copy all text</string>
+    <string name="cd_copy">Copy</string>
+    <string name="cd_expand_lookup">Expand lookup sheet</string>
+    <string name="cd_freeze">Freeze frame</string>
+    <string name="cd_resume">Resume camera</string>
+
+    <!-- Permission screen -->
+    <string name="permission_camera_rationale">HanziLens needs camera access to detect Chinese characters.</string>
+    <string name="permission_camera_denied">Camera permission is required. Please grant it in the app settings.</string>
+    <string name="permission_grant_btn">Grant Permission</string>
+    <string name="permission_open_settings_btn">Open App Settings</string>
+
+    <!-- Camera overlay badges -->
+    <string name="badge_frozen">● FROZEN</string>
+    <string name="badge_scanning">⟳ SCANNING…</string>
+
+    <!-- Lookup sheet -->
+    <string name="lookup_drag_hint">blocks  •  drag up for definitions</string>
+    <string name="lookup_no_definition">No definition found</string>
+    <string name="lookup_nothing_yet">Freeze the camera, then tap a character block to look it up.</string>
+    <string name="lookup_block_label">Block %d</string>
+
+    <!-- Debug panel -->
+    <string name="debug_no_text">No Chinese text detected in ROI</string>
+
+    <!-- Settings — Display section -->
+    <string name="settings_section_display">Display</string>
+    <string name="settings_debug_overlay">Performance HUD</string>
+    <string name="settings_debug_overlay_on">CPU, memory and ML timing visible</string>
+    <string name="settings_debug_overlay_off">Hidden</string>
+    <string name="settings_debug_ocr_text">OCR Debug Text</string>
+    <string name="settings_debug_ocr_text_on">Detected blocks shown at top of camera</string>
+    <string name="settings_debug_ocr_text_off">Hidden</string>
+    <string name="settings_pinyin_autosize">Dynamic Pinyin Size</string>
+    <string name="settings_pinyin_autosize_on">Scales to match character size</string>
+    <string name="settings_pinyin_autosize_off">Fixed size (13 sp)</string>
+
+    <!-- Settings — OCR section -->
+    <string name="settings_section_ocr">OCR</string>
+    <string name="settings_detection_speed">Detection Speed</string>
+    <string name="settings_detection_speed_value">Every %.1f s</string>
+
+    <!-- Settings — App section -->
+    <string name="settings_section_app">App</string>
+
+    <!-- Camera settings sheet -->
+    <string name="camera_settings_title">Camera Settings</string>
+    <string name="camera_zoom_label">Zoom  —  %d%%</string>
+    <string name="camera_lens_label">Lens</string>
+    <string name="camera_lens_back">Back</string>
+    <string name="camera_lens_front">Front</string>
+
+    <!-- Splash / init screen -->
+    <string name="splash_initializing">Initializing…</string>
+    <string name="splash_first_launch_hint">First launch: ~30–60 s to build the dictionary (one-time only)</string>
+    <string name="splash_error_action">Check logcat for details, or reinstall the app.</string>
+</resources>

@@ -22,12 +22,27 @@ misc.xml
 deploymentTargetDropDown.xml
 render.experimental.xml
 
-# Keystore files
+# Keystore files — NEVER commit signing keys
 *.jks
 *.keystore
+*.p12
+keystore.properties
 
-# Google Services (e.g. APIs or Firebase)
+# Google Services / API keys — NEVER commit
 google-services.json
+*.env
+.env
+
+# CC-CEDICT dictionary data file (~10 MB, CC BY-SA 3.0 licensed)
+# Download instructions: app/src/main/assets/CEDICT_SETUP.txt
+cedict_ts.u8
+**/assets/cedict_ts.u8
 
 # Android Profiling
 *.hprof
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db

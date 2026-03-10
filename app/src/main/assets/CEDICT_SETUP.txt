@@ -1,0 +1,29 @@
+CEDICT SETUP — READ BEFORE BUILDING
+=====================================
+
+The dictionary file is NOT included in this repo (it is ~15 MB).
+You must download it manually and place it here before building.
+
+STEPS
+-----
+1. Go to: https://www.mdbg.net/chinese/dictionary?page=cc-cedict
+2. Click "Download" → download the .gz or .zip file
+3. Extract it — you will get a file named something like:
+       cedict_1_0_ts_utf-8_mdbg.txt
+4. Rename it to:
+       cedict.u8
+5. Place it in this folder:
+       app/src/main/assets/cedict.u8
+
+The app will detect the file on first launch and automatically:
+  - Parse all ~120,000 entries (~30–60 seconds, one time only)
+  - Store them in the on-device Room database
+  - Build a fast binary index for pinyin lookup
+
+LICENSE
+-------
+CC-CEDICT is distributed under Creative Commons Attribution-Share Alike 3.0.
+You must credit MDBG in your app's About screen:
+
+  Dictionary data: CC-CEDICT © MDBG (https://www.mdbg.net)
+  Licensed under CC BY-SA 3.0
