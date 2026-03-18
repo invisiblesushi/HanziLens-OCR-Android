@@ -45,8 +45,9 @@ class CameraManager(private val context: Context) {
         future.addListener({
             cameraProvider = future.get()
 
+            // No explicit setTargetRotation on Preview — PreviewView handles its own
+            // orientation transforms automatically via the display manager.
             val preview = Preview.Builder()
-                .setTargetRotation(displayRotation)
                 .build()
                 .also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
@@ -90,6 +91,16 @@ class CameraManager(private val context: Context) {
     /** Linear zoom in [0, 1] — CameraX maps this to the device's zoom range. */
     fun setLinearZoom(linear: Float) {
         camera?.cameraControl?.setLinearZoom(linear.coerceIn(0f, 1f))
+    }
+
+    /** Current linear zoom [0, 1] from CameraX (best baseline for pinch gestures). */
+    fun getCurrentLinearZoom(): Float {
+        return camera?.cameraInfo?.zoomState?.value?.linearZoom ?: 0f
+    }
+
+    /** Current zoom ratio (e.g. 1.0, 2.0, 3.5). */
+    fun getCurrentZoomRatio(): Float {
+        return camera?.cameraInfo?.zoomState?.value?.zoomRatio ?: 1f
     }
 
     fun shutdown() {

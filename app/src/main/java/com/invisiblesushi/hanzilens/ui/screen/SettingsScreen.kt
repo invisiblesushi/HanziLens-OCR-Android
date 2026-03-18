@@ -7,10 +7,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.HorizontalDivider
@@ -44,6 +45,7 @@ fun SettingsScreen(navController: NavController, viewModel: CameraViewModel) {
     val pinyinAutoSize   by viewModel.pinyinAutoSize.collectAsState()
     val showDebug        by viewModel.showDebug.collectAsState()
     val showOcrDebugText by viewModel.showOcrDebugText.collectAsState()
+    val keepScreenOn     by viewModel.keepScreenOn.collectAsState()
 
     Column(
         modifier = Modifier
@@ -51,6 +53,38 @@ fun SettingsScreen(navController: NavController, viewModel: CameraViewModel) {
             .verticalScroll(rememberScrollState())
     ) {
         SettingsSectionLabel(stringResource(R.string.settings_section_display))
+
+        // Keep screen on toggle
+        ListItem(
+            headlineContent = { Text(stringResource(R.string.settings_keep_screen_on), color = Color.White) },
+            supportingContent = {
+                Text(
+                    text  = if (keepScreenOn) stringResource(R.string.settings_keep_screen_on_on)
+                            else               stringResource(R.string.settings_keep_screen_on_off),
+                    color    = AppColors.Dim,
+                    fontSize = 12.sp
+                )
+            },
+            leadingContent = {
+                Icon(Icons.Default.LightMode, contentDescription = null,
+                    tint = if (keepScreenOn) AppColors.Green else AppColors.Dim)
+            },
+            trailingContent = {
+                Switch(
+                    checked         = keepScreenOn,
+                    onCheckedChange = { viewModel.setKeepScreenOn(it) },
+                    colors          = SwitchDefaults.colors(
+                        checkedThumbColor   = Color.Black,
+                        checkedTrackColor   = AppColors.Green,
+                        uncheckedThumbColor = AppColors.Dim,
+                        uncheckedTrackColor = AppColors.DividerStrong
+                    )
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+        )
+
+        HorizontalDivider(color = AppColors.Divider)
 
         // Debug overlay toggle
         ListItem(

@@ -39,6 +39,9 @@
 
     <!-- Settings — Display section -->
     <string name="settings_section_display">Display</string>
+    <string name="settings_keep_screen_on">Keep Screen On</string>
+    <string name="settings_keep_screen_on_on">Screen stays awake while app is open</string>
+    <string name="settings_keep_screen_on_off">Screen may sleep normally</string>
     <string name="settings_debug_overlay">Performance HUD</string>
     <string name="settings_debug_overlay_on">CPU, memory and ML timing visible</string>
     <string name="settings_debug_overlay_off">Hidden</string>

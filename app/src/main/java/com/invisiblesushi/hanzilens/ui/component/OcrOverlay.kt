@@ -8,12 +8,15 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -22,12 +25,15 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.invisiblesushi.hanzilens.ocr.RecognizedBlock
 import com.invisiblesushi.hanzilens.pinyin.PinyinResult
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 private val BORDER_COLOR = Color(0xFF00FF88)
@@ -134,61 +140,100 @@ fun OcrOverlay(
             }
         }
 
-        // ── Labels: pinyin pill above each box ────────────────────────────────
-        val padPx = with(density) { 3.dp.toPx() }
-
+        // ── Labels: pinyin centered over each character block ────────────────────
+        // Vertical blocks (boxH > boxW * 1.5) get one pinyin token per line, then
+        // the whole text is rotated -90° so each syllable sits alongside its character,
+        // matching Google Translate's camera mode behaviour.
         mapped.forEach { (block, sl, st, sr, sb) ->
             val pinyin = pinyinResults[block.text] ?: return@forEach
 
-            // Only show tokens that have actual pinyin — skip "?" for unmatched chars
             val validPinyin = pinyin.tokens.filter { it.pinyin.isNotBlank() }
             if (validPinyin.isEmpty()) return@forEach
 
-            val displayText = if (validPinyin.size <= 1)
-                validPinyin.joinToString(" ") { it.pinyin }
+            val boxW       = (sr - sl).coerceAtLeast(1f)
+            val boxH       = (sb - st).coerceAtLeast(1f)
+            val isVertical = boxH > boxW * 1.5f
+            val numTokens  = validPinyin.size.coerceAtLeast(1)
+
+            // Vertical: one syllable per line → each aligns with its character after rotation.
+            // Horizontal: space-separated on a single line.
+            val displayText = if (isVertical)
+                validPinyin.joinToString("\n") { it.pinyin }
             else
                 validPinyin.joinToString("  ") { it.pinyin }
 
-            // Dynamic font size: 35 % of the block's screen pixel height, clamped 9–28 sp.
-            // Falls back to a fixed 13 sp when auto-sizing is off.
             val fontSizeSp = if (pinyinAutoSize) {
-                with(density) { ((sb - st) * 0.35f).toSp() }.value.coerceIn(9f, 28f)
+                // Fit-to-box sizing using only known box dimensions.
+                // We model monospace character width as ~0.58×fontSizePx and lineHeight as 1.25×fontSize.
+                val lineHeightFactor = 1.25f
+                val charWidthFactor  = 0.58f
+                val padXpx = with(density) { 4.dp.toPx() } * 2f
+                val padYpx = with(density) { 2.dp.toPx() } * 2f
+
+                val availWpx = (boxW - padXpx).coerceAtLeast(1f)
+                val availHpx = (boxH - padYpx).coerceAtLeast(1f)
+
+                if (isVertical) {
+                    // One token per line (after rotation). Constrain by total height and by longest syllable width.
+                    val maxTokenLen = validPinyin.maxOf { it.pinyin.length.coerceAtLeast(1) }
+                    val byHeightPx  = availHpx / (numTokens * lineHeightFactor)
+                    val byWidthPx   = availWpx / (maxTokenLen * charWidthFactor)
+                    val px          = min(byHeightPx, byWidthPx)
+                    with(density) { px.toSp() }.value.coerceIn(7f, 36f)
+                } else {
+                    // Single line. Constrain by available height and total text width.
+                    val textLen   = displayText.length.coerceAtLeast(1)
+                    val byHeightPx = availHpx / lineHeightFactor
+                    val byWidthPx  = availWpx / (textLen * charWidthFactor)
+                    val px         = min(byHeightPx, byWidthPx)
+                    with(density) { px.toSp() }.value.coerceIn(7f, 36f)
+                }
             } else {
                 13f
             }
             val lineHeightSp = fontSizeSp * 1.25f
 
-            // Label height follows font size so the above/inside decision stays accurate
-            val labelH = with(density) { (fontSizeSp * density.density + padPx * 2) }
-
-            // Place label above the box if room, else inside the top edge
-            val labelY = if (st >= labelH + padPx) (st - labelH - padPx).roundToInt()
-                         else                       (st + padPx).roundToInt()
-            val labelX    = sl.coerceAtLeast(padPx).roundToInt()
-            val maxLabelW = (sw - labelX).coerceAtLeast(60f)
+            // Never show "…" on the overlay; when auto-sizing is on we should fit exactly,
+            // and when it's off we prefer clipping over lying with ellipsis.
+            val overflow = TextOverflow.Clip
 
             Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .offset { IntOffset(labelX, labelY) }
-                    .widthIn(max = with(density) { maxLabelW.toDp() })
-                    .background(
-                        LABEL_BG,
-                        RoundedCornerShape(
-                            topStart    = 4.dp, topEnd     = 4.dp,
-                            bottomEnd   = 4.dp,
-                            bottomStart = if (st < labelH) 4.dp else 0.dp
-                        )
+                    .offset { IntOffset(sl.roundToInt(), st.roundToInt()) }
+                    .size(
+                        width  = with(density) { boxW.toDp() },
+                        height = with(density) { boxH.toDp() }
                     )
-                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                    .background(LABEL_BG, RoundedCornerShape(4.dp))
+                    .clipToBounds()
             ) {
+                // For vertical blocks: give the Text swapped dimensions (width=boxH, height=boxW)
+                // then rotate -90°. Because rotate() preserves layout bounds, the element's
+                // center stays at the outer box center and after rotation it fills it perfectly.
+                val textModifier = if (isVertical)
+                    Modifier
+                        .requiredSize(
+                            width  = with(density) { boxH.toDp() },
+                            height = with(density) { boxW.toDp() }
+                        )
+                        .rotate(-90f)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                else
+                    Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+
                 Text(
                     text       = displayText,
                     color      = PINYIN_COLOR,
                     fontSize   = fontSizeSp.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Medium,
-                    maxLines   = 2,
-                    lineHeight = lineHeightSp.sp
+                    textAlign  = TextAlign.Center,
+                    softWrap   = isVertical,   // horizontal: single line, no wrapping
+                    maxLines   = if (isVertical) numTokens else 1,
+                    overflow   = overflow,
+                    lineHeight = lineHeightSp.sp,
+                    modifier   = textModifier
                 )
             }
         }

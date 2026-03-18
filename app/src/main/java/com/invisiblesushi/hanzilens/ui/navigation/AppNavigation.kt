@@ -35,13 +35,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
+import android.app.Activity
+import android.view.WindowManager
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -77,9 +81,24 @@ private val MONO  = AppColors.Mono
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppNavigation(viewModel: CameraViewModel = viewModel()) {
-    val appState     by viewModel.appState.collectAsState()
-    val loadProgress by viewModel.loadProgress.collectAsState()
-    val loadingMsg   by viewModel.loadingMessage.collectAsState()
+    val appState      by viewModel.appState.collectAsState()
+    val loadProgress  by viewModel.loadProgress.collectAsState()
+    val loadingMsg    by viewModel.loadingMessage.collectAsState()
+    val keepScreenOn  by viewModel.keepScreenOn.collectAsState()
+
+    // Keep the screen awake according to the user's preference.
+    val view = LocalView.current
+    DisposableEffect(keepScreenOn) {
+        val window = (view.context as? Activity)?.window
+        if (keepScreenOn) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     // Show splash/loading until dictionary is ready
     if (appState != AppState.READY) {

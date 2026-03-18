@@ -12,6 +12,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -83,6 +85,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.viewinterop.AndroidView
 import android.content.Intent
 import android.net.Uri
@@ -97,6 +100,7 @@ import com.invisiblesushi.hanzilens.ocr.OcrAnalyzer
 import com.invisiblesushi.hanzilens.ocr.RecognizedBlock
 import com.invisiblesushi.hanzilens.pinyin.PinyinResult
 import com.invisiblesushi.hanzilens.ui.component.OcrOverlay
+import com.invisiblesushi.hanzilens.ui.component.rememberTextToSpeech
 import com.invisiblesushi.hanzilens.ui.theme.AppColors
 import com.invisiblesushi.hanzilens.ui.viewmodel.CameraViewModel
 import com.invisiblesushi.hanzilens.ui.viewmodel.DebugMetrics
@@ -179,6 +183,7 @@ private fun CameraPreview(
         }.also { viewModel.ocrAnalyzerRef = it }
     }
     val cameraManager = remember { CameraManager(context).also { viewModel.cameraManagerRef = it } }
+    val zoomRatio     = cameraManager.getCurrentZoomRatio()
     val previewView   = remember {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
@@ -228,6 +233,9 @@ private fun CameraPreview(
     // Controls whether the lookup sheet is fully open vs. collapsed to the peek tab
     var sheetVisible by remember { mutableStateOf(false) }
 
+    // Pinch-to-zoom is enabled for the live preview.
+    // After capture (frozen state) zoom is intentionally disabled.
+
     // Infinite pulse used to animate the freeze button while scanning
     val scanInfinite  = rememberInfiniteTransition(label = "scan_pulse")
     val scanPulseAlpha by scanInfinite.animateFloat(
@@ -241,9 +249,10 @@ private fun CameraPreview(
     // Keep OcrAnalyzer.paused in sync
     LaunchedEffect(paused) { ocrAnalyzer.paused = paused }
 
-    // Auto-show sheet when lookups arrive; collapse peek tab if lookups are cleared
-    LaunchedEffect(wordLookups.isNotEmpty()) {
-        sheetVisible = wordLookups.isNotEmpty()
+    // When lookups are cleared, also hide the sheet. Do NOT auto-open on new
+    // results — the peek tab appears and the user drags it up themselves.
+    LaunchedEffect(wordLookups.isEmpty()) {
+        if (wordLookups.isEmpty()) sheetVisible = false
     }
 
     LaunchedEffect(focusTap) {
@@ -259,7 +268,10 @@ private fun CameraPreview(
         when {
             sheetVisible           -> sheetVisible = false          // sheet → peek tab
             wordLookups.isNotEmpty() -> viewModel.clearLookup()     // peek tab → gone
-            paused                 -> { paused = false; frozenBitmap = null }
+            paused                 -> {
+                paused = false
+                frozenBitmap = null
+            }
         }
     }
 
@@ -279,6 +291,16 @@ private fun CameraPreview(
                 factory  = { previewView },
                 modifier = Modifier
                     .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, _, zoomChange, _ ->
+                            // IMPORTANT: use CameraX's *current* zoom as baseline.
+                            // Otherwise we can "jump" to the ultrawide minimum when
+                            // `linearZoom` state is still at an old value.
+                            val currentZoom = cameraManager.getCurrentLinearZoom()
+                            val newZoom     = (currentZoom * zoomChange).coerceIn(0f, 1f)
+                            viewModel.setZoom(newZoom)
+                        }
+                    }
                     .pointerInput(Unit) {
                         detectTapGestures { tapOffset ->
                             focusTap = tapOffset
@@ -459,6 +481,8 @@ private fun CameraPreview(
             CameraSettingsSheet(
                 viewModel  = viewModel,
                 linearZoom = linearZoom,
+                zoomRatio  = zoomRatio,
+                paused      = paused,
                 lensFacing = lensFacing,
                 onDismiss  = onCameraSettingsDismiss
             )
@@ -570,6 +594,8 @@ private fun CornerHandle(px: Float, py: Float, handlePx: Float, onDrag: (Float, 
 private fun CameraSettingsSheet(
     viewModel: CameraViewModel,
     linearZoom: Float,
+    zoomRatio: Float,
+    paused: Boolean,
     lensFacing: Int,
     onDismiss: () -> Unit
 ) {
@@ -582,12 +608,20 @@ private fun CameraSettingsSheet(
         Text("Camera Settings", color = Color.White, fontSize = 18.sp,
             fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
 
-        // Zoom
-        Text("Zoom  —  ${(linearZoom * 100).roundToInt()}%",
+        // Zoom (show as x ratio, e.g. 1.0x, 2.0x)
+        val ratioRounded = (zoomRatio * 10f).roundToInt() / 10f
+        val ratioText =
+            if (kotlin.math.abs(ratioRounded - ratioRounded.roundToInt()) < 0.0001f)
+                "${ratioRounded.roundToInt()}x"
+            else
+                "${ratioRounded}x"
+
+        Text("Zoom  —  $ratioText",
             color = Color(0xFFAAAAAA), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
         Slider(
             value         = linearZoom,
-            onValueChange = { viewModel.setZoom(it) },
+            enabled       = !paused,
+            onValueChange = { if (!paused) viewModel.setZoom(it) },
             valueRange    = 0f..1f,
             colors        = SliderDefaults.colors(
                 thumbColor         = Color(0xFF00FF88),
@@ -796,9 +830,18 @@ private fun WordLookupSheet(
     onDismiss: () -> Unit
 ) {
     val clipboard   = context.getSystemService(android.content.ClipboardManager::class.java)
-    val allText     = groups.joinToString("  ") { it.rawText }
-    val allPinyin   = groups.joinToString("   ") { it.fullPinyin }
     val multiBlock  = groups.size > 1
+
+    val blockExpanded = remember { mutableStateMapOf<Int, Boolean>() }
+    val speak         = rememberTextToSpeech()
+
+    // Compact 1-line summary header (pinyin on top of characters).
+    val combinedPinyin = remember(groups) {
+        groups.joinToString("   ") { it.fullPinyin }.trim()
+    }
+    val combinedChars = remember(groups) {
+        groups.joinToString("") { it.rawText }.trim()
+    }
 
     Column(
         modifier = Modifier
@@ -806,59 +849,36 @@ private fun WordLookupSheet(
             .heightIn(max = LocalConfiguration.current.screenHeightDp.dp * 0.85f)
             .windowInsetsPadding(WindowInsets.navigationBars)
     ) {
-        // ── Combined header (shown in partial-expand peek) ────────────────────
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(0xFF1A1A1A))
-                .padding(horizontal = 16.dp, vertical = 14.dp)
+                .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
-            Row(
-                modifier              = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment     = Alignment.Top
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    // Pinyin — always shown above the combined characters
-                    Text(allPinyin, color = AMBER, fontSize = 12.sp,
-                        fontFamily = MONO, lineHeight = 17.sp)
-                    Text(
-                        text       = allText,
-                        color      = Color.White,
-                        fontSize   = if (multiBlock) 18.sp else 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        lineHeight = if (multiBlock) 24.sp else 28.sp,
-                        modifier   = Modifier.padding(top = 3.dp)
-                    )
-                    // For multiple blocks show a small summary line
-                    if (multiBlock) {
-                        Text(
-                            "${groups.size} blocks  •  drag up for definitions",
-                            color      = DIM,
-                            fontSize   = 10.sp,
-                            fontFamily = MONO,
-                            modifier   = Modifier.padding(top = 3.dp)
-                        )
-                    }
-                }
-                IconButton(onClick = {
-                    clipboard?.setPrimaryClip(
-                        android.content.ClipData.newPlainText("Chinese text", allText)
-                    )
-                }) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy all",
-                        tint = DIM, modifier = Modifier.size(20.dp))
-                }
-            }
+            Text(
+                text       = combinedPinyin,
+                color      = AMBER,
+                fontSize   = 11.sp,
+                fontFamily = MONO,
+                lineHeight = 14.sp,
+                maxLines   = 1,
+                overflow   = TextOverflow.Clip
+            )
+            Text(
+                text       = combinedChars,
+                color      = Color.White,
+                fontSize   = 16.sp,
+                fontWeight = FontWeight.Bold,
+                lineHeight = 20.sp,
+                maxLines   = 1,
+                overflow   = TextOverflow.Clip,
+                modifier   = Modifier.padding(top = 2.dp)
+            )
         }
 
         HorizontalDivider(color = Color(0xFF2A2A2A))
 
         // ── Per-block sections — each block collapses/expands as a unit ────────
-        // Collapsed (default): shows block's rawText + pinyin + chevron
-        // Expanded: shows word list with pinyin + definitions
-        val blockExpanded = remember { mutableStateMapOf<Int, Boolean>() }
-
         LazyColumn(
             modifier       = Modifier.fillMaxWidth(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp)
@@ -881,16 +901,6 @@ private fun WordLookupSheet(
                             verticalAlignment     = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                if (multiBlock) {
-                                    Text(
-                                        "Block ${groupIdx + 1}",
-                                        color      = DIM,
-                                        fontSize   = 10.sp,
-                                        fontFamily = MONO,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier   = Modifier.padding(bottom = 3.dp)
-                                    )
-                                }
                                 Text(
                                     group.fullPinyin,
                                     color      = AMBER,
@@ -919,6 +929,27 @@ private fun WordLookupSheet(
                                             tint = DIM, modifier = Modifier.size(15.dp))
                                     }
                                 }
+
+                                IconButton(
+                                    onClick = {
+                                        // For learning: read the Hanzi first. If we have pinyin,
+                                        // append it as a second sentence.
+                                        // (User preference: TTS is ONLY for Chinese characters.)
+                                        val speakText = group.rawText
+
+                                        // Prefer a Chinese voice so Hanzi is spoken correctly.
+                                        speak(speakText, java.util.Locale.CHINA)
+                                    },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.VolumeUp,
+                                        contentDescription = "Speak",
+                                        tint = DIM,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
                                 Icon(
                                     imageVector        = if (isBlockExpanded) Icons.Default.ExpandLess
                                                         else Icons.Default.ExpandMore,

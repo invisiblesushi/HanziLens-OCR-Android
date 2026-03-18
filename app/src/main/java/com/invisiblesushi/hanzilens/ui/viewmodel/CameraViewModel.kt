@@ -54,6 +54,92 @@ private fun String.containsChinese(): Boolean = any {
     it.code in 0xF900..0xFAFF
 }
 
+/**
+ * Returns true only when the CENTER of this rect lies inside [roi].
+ * Stricter than RectF.intersects which triggers on even a 1-pixel overlap —
+ * that caused characters near the ROI edge to appear even when mostly outside.
+ */
+private fun RectF.centerInsideRoi(roi: RectF): Boolean =
+    roi.contains(centerX(), centerY())
+
+/**
+ * ML Kit sometimes returns vertical text as multiple single-character blocks stacked
+ * in a column. For pinyin/lookup it behaves better if we treat those as one string.
+ *
+ * This merges blocks where:
+ * - each block's text is a single Chinese character
+ * - X centers are close (same column)
+ * - Y order is top→bottom with small gaps/overlap
+ *
+ * Bounding boxes are merged (union) and text is concatenated top→bottom.
+ */
+private fun mergeVerticalSingleCharBlocks(blocks: List<RecognizedBlock>): List<RecognizedBlock> {
+    if (blocks.size < 2) return blocks
+
+    val candidates = blocks.filter { it.text.length == 1 && it.text.containsChinese() && !it.boundingBox.isEmpty }
+    if (candidates.size < 2) return blocks
+
+    val used = HashSet<RecognizedBlock>(candidates.size)
+    val merged = ArrayList<RecognizedBlock>(blocks.size)
+
+    // Keep non-candidates as-is.
+    blocks.forEach { b ->
+        if (b !in candidates) merged.add(b)
+    }
+
+    // Sort candidates top-to-bottom to build columns.
+    val sorted = candidates.sortedWith(compareBy({ it.boundingBox.centerX() }, { it.boundingBox.top }))
+
+    for (start in sorted) {
+        if (start in used) continue
+
+        val group = ArrayList<RecognizedBlock>()
+        group.add(start)
+        used.add(start)
+
+        var current = start
+        while (true) {
+            val cRect = current.boundingBox
+            val cCx   = cRect.centerX()
+            val cH    = cRect.height().coerceAtLeast(1f)
+
+            // Thresholds scale with box size to handle near/far text.
+            val xThresh   = (cRect.width() * 0.55f).coerceAtLeast(10f)
+            val gapThresh = (cH * 0.70f).coerceAtLeast(12f)
+
+            val next = sorted
+                .asSequence()
+                .filter { it !in used }
+                .filter { kotlin.math.abs(it.boundingBox.centerX() - cCx) <= xThresh }
+                .filter { it.boundingBox.top >= cRect.top - cH * 0.20f } // allow slight overlap
+                .filter { it.boundingBox.top - cRect.bottom <= gapThresh }
+                .minByOrNull { it.boundingBox.top }
+
+            if (next == null) break
+            group.add(next)
+            used.add(next)
+            current = next
+        }
+
+        if (group.size == 1) {
+            merged.add(group.first())
+        } else {
+            val ordered = group.sortedBy { it.boundingBox.top }
+            val union = RectF(ordered.first().boundingBox)
+            ordered.drop(1).forEach { union.union(it.boundingBox) }
+            merged.add(
+                RecognizedBlock(
+                    text        = ordered.joinToString(separator = "") { it.text },
+                    boundingBox = union
+                )
+            )
+        }
+    }
+
+    // Stable ordering (top-to-bottom) feels best for overlays/debug output.
+    return merged.sortedWith(compareBy({ it.boundingBox.top }, { it.boundingBox.left }))
+}
+
 class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Persisted settings ────────────────────────────────────────────────────
@@ -101,6 +187,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _showOcrDebugText = MutableStateFlow(prefs.getBoolean("showOcrDebugText", false))
     val showOcrDebugText: StateFlow<Boolean> = _showOcrDebugText.asStateFlow()
+
+    private val _keepScreenOn = MutableStateFlow(prefs.getBoolean("keepScreenOn", true))
+    val keepScreenOn: StateFlow<Boolean> = _keepScreenOn.asStateFlow()
+
 
     // ── Word lookup (tap on frozen block) ────────────────────────────────────
     private val _wordLookups = MutableStateFlow<List<BlockLookupGroup>>(emptyList())
@@ -237,13 +327,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 val blocks = runMlKitOnBitmap(safeBitmap)
                     .filter { block ->
                         block.text.containsChinese() &&
-                        RectF.intersects(
-                            CoordinateMapper.imageRectToNormalized(
-                                block.boundingBox,
-                                safeBitmap.width, safeBitmap.height, 0
-                            ), roi
-                        )
+                        CoordinateMapper.imageRectToNormalized(
+                            block.boundingBox,
+                            safeBitmap.width, safeBitmap.height, 0
+                        ).centerInsideRoi(roi)
                     }
+                    .let(::mergeVerticalSingleCharBlocks)
 
                 // Replace live OCR results with the higher-quality freeze results.
                 // Also update image dimensions in metrics so OcrOverlay maps bounding
@@ -351,6 +440,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putBoolean("showOcrDebugText", enabled).apply()
     }
 
+    fun setKeepScreenOn(enabled: Boolean) {
+        _keepScreenOn.value = enabled
+        prefs.edit().putBoolean("keepScreenOn", enabled).apply()
+    }
+
+
     fun onOcrResults(
         blocks: List<RecognizedBlock>,
         imageWidth: Int, imageHeight: Int,
@@ -361,22 +456,21 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // so CoordinateMapper simply normalises x/effW, y/effH — correct for ROI comparison.
         val filtered = blocks.filter { block ->
             block.text.containsChinese() &&
-            RectF.intersects(
-                CoordinateMapper.imageRectToNormalized(
-                    block.boundingBox, imageWidth, imageHeight, rotationDegrees
-                ), roi
-            )
+            CoordinateMapper.imageRectToNormalized(
+                block.boundingBox, imageWidth, imageHeight, rotationDegrees
+            ).centerInsideRoi(roi)
         }
-        _ocrResults.value = filtered
+        val merged = mergeVerticalSingleCharBlocks(filtered)
+        _ocrResults.value = merged
 
         val converter = pinyinConverter
         if (converter != null) {
-            _pinyinResults.value = filtered.associate { it.text to converter.convert(it.text) }
+            _pinyinResults.value = merged.associate { it.text to converter.convert(it.text) }
         }
 
         _debugMetrics.value = _debugMetrics.value.copy(
             ocrLatencyMs    = latencyMs,
-            blocksDetected  = filtered.size,
+            blocksDetected  = merged.size,
             imageWidth      = imageWidth,
             imageHeight     = imageHeight,
             rotationDegrees = rotationDegrees,
